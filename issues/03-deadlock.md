@@ -2,14 +2,15 @@
 
 **Labels**: `bug`, `deadlock`, `threading`  
 **Severity**: Critical  
-**Component**: agent-leak-app — `run_deadlock()` 시나리오
+**Component**: agent-app-leak — Deadlock 시나리오 (`MULTI_THREAD_ENABLE=true`)
 
 ---
 
 ## 요약
 
-`MULTI_THREAD_ENABLE=true` 조건에서 두 개의 워커 스레드가 **서로의 Lock을 순환 대기**하여 영구 블로킹(Deadlock)에 빠진다.  
-프로세스 자체는 살아있으나 워커 스레드는 진행 불가 상태가 된다.
+`MULTI_THREAD_ENABLE=true` 조건에서 바이너리가 **"POTENTIAL DEADLOCK IN CONCURRENT MODE"** 경고를 출력하며  
+두 개의 별도 프로세스(스케줄러 + 워커)를 생성한다.  
+동시에 CpuWorker도 실행되어 CPU 부하가 단계적으로 상승하고, 내부 임계치(~50%)를 초과하면 **SIGTERM**으로 종료된다.
 
 ---
 
@@ -18,12 +19,17 @@
 | 항목 | 값 |
 |---|---|
 | OS | Ubuntu 24.04 LTS (Docker, `--privileged`) |
-| Python | 3.12 |
-| 활성 시나리오 | `MULTI_THREAD_ENABLE=true` |
+| 바이너리 | `agent-app-leak` (ELF x86_64) |
+| 활성 시나리오 | `MEMORY_LIMIT=512`, `CPU_MAX_OCCUPY=100`, `MULTI_THREAD_ENABLE=true` |
 
 ### 환경변수
 
 ```bash
+export AGENT_HOME=/home/agent-admin/agent-app
+export AGENT_PORT=15034
+export AGENT_UPLOAD_DIR=/home/agent-admin/agent-app/upload_files
+export AGENT_KEY_PATH=/home/agent-admin/agent-app/api_keys
+export AGENT_LOG_DIR=/var/log/agent-app
 export MEMORY_LIMIT=512
 export CPU_MAX_OCCUPY=100
 export MULTI_THREAD_ENABLE=true
@@ -34,7 +40,7 @@ export MULTI_THREAD_ENABLE=true
 ## 재현 절차
 
 ```bash
-python3 $AGENT_HOME/agent_leak_app.py
+$AGENT_HOME/agent-app-leak
 ```
 
 ---
@@ -43,93 +49,104 @@ python3 $AGENT_HOME/agent_leak_app.py
 
 ```
 >>> Starting Agent Boot Sequence...
-[1/5] Checking User Account               [OK]
-[2/5] Verifying Environment Variables     [OK]
-[3/5] Checking Required Files             [OK]
-[4/5] Checking Port Availability          [OK]
-[5/5] Verifying Log Permission            [OK]
+[1/6] Checking User Account               [OK]
+   ... Running as service user 'agent-admin' (uid=1001)
+[2/6] Verifying Environment Variables     [OK]
+   ... All required Envs correct
+[3/6] Checking Required Files             [OK]
+   ... Verified 'secret.key' with correct key string.
+[4/6] Checking Port Availability          [OK]
+   ... Port 15034 is available.
+[5/6] Verifying Log Permission            [OK]
+   ... Log directory is writable: /var/log/agent-app
+[6/6] Verifying Mission Environment       [OK]
+   ... MEMORY_LIMIT=512MB, CPU_MAX_OCCUPY=100%, MULTI_THREAD_ENABLE=True
+------------------------------------------------------------
 All Boot Checks Passed!
 Agent READY
-2026-05-11 16:05:04,170 [INFO] [SafetyGuard] Process priority lowered (nice=10).
-2026-05-11 16:05:04,170 [INFO] Agent listening at port 15034
-2026-05-11 16:05:04,170 [INFO] === Agent Started. Multi-Thread Mode. ===
-2026-05-11 16:05:04,170 [INFO] [ThreadMgr] Spawning worker threads...
-2026-05-11 16:05:04,172 [INFO] [Thread-A] Task Started. Acquiring Resource-A...
-2026-05-11 16:05:04,172 [INFO] [Thread-A] Acquired Resource-A. Calculating... (50%)
-2026-05-11 16:05:04,273 [INFO] [Thread-B] Task Started. Acquiring Resource-B...
-2026-05-11 16:05:04,273 [INFO] [Thread-B] Acquired Resource-B. Calculating... (50%)
-2026-05-11 16:05:04,273 [INFO] [ThreadMgr] All threads running. Monitoring...
-2026-05-11 16:05:04,672 [INFO] [Thread-A] WAITING for Resource-B... [BLOCKED]
-2026-05-11 16:05:04,773 [INFO] [Thread-B] WAITING for Resource-A... [BLOCKED]
-2026-05-11 16:05:09,274 [INFO] [ThreadMgr] Status check — Thread-A alive:True Thread-B alive:True
-2026-05-11 16:05:14,924 [INFO] [ThreadMgr] Status check — Thread-A alive:True Thread-B alive:True
-2026-05-11 16:05:19,924 [INFO] [ThreadMgr] Status check — Thread-A alive:True Thread-B alive:True
+2026-05-12 02:24:49,486 [INFO] [SafetyGuard] Process priority lowered (nice=10).
+2026-05-12 02:24:49,486 [INFO] Agent listening at port 15034
+
+==================================================
+ [ Agent Initiate ] Resource Check
+==================================================
+ [ MEMORY ] Limit: 512MB       [ OK ]
+ [ CPU    ] Limit: 100%        [ WARNING: Recommend Under 50% ]
+ [ THREAD ] Concurrency: True  [ WARNING ]
+--------------------------------------------------
+ >>> SYSTEM WARNING: POTENTIAL DEADLOCK IN CONCURRENT MODE.
+==================================================
+
+2026-05-12 02:24:51,486 [INFO] [CpuWorker] Started. Maximum CPU Limit: 100%
+2026-05-12 02:24:51,487 [INFO] [CpuWorker] Current Load: 5.00%
+2026-05-12 02:24:54,680 [INFO] [CpuWorker] Current Load: 5.11%
+2026-05-12 02:24:57,788 [INFO] [CpuWorker] Current Load: 6.41%
+2026-05-12 02:25:00,890 [INFO] [CpuWorker] Current Load: 12.54%
+2026-05-12 02:25:03,991 [INFO] [CpuWorker] Current Load: 22.06%
+2026-05-12 02:25:07,092 [INFO] [CpuWorker] Current Load: 31.57%
+2026-05-12 02:25:10,193 [INFO] [CpuWorker] Current Load: 34.00%
+2026-05-12 02:25:13,295 [INFO] [CpuWorker] Current Load: 37.42%
+2026-05-12 02:25:16,396 [INFO] [CpuWorker] Current Load: 43.50%
+2026-05-12 02:25:19,497 [INFO] [CpuWorker] Current Load: 52.23%
+2026-05-12 02:25:19,597 [CRITICAL] [CpuWorker] CPU Threshold Violated! (52.23%).
+Terminated
 ```
 
-**이후 로그 없음**: `ThreadMgr Status check` 메시지만 5초 간격으로 반복되며 워커 진행 없음
-
-### monitor.sh 스레드 상태
+### 프로세스 구조 (실행 중 관찰)
 
 ```
-====== SYSTEM MONITOR RESULT ======
-Time: 2026-05-11 16:05:57
-
-[HEALTH CHECK]
-Process 'agent_leak_app'... [OK] (PID: 7835)
-Port 15034... [WARN] (Not listening — process may be initializing or crashed)
-
-[THREAD INFO]
-Thread count   : 3
-   7835    7835 Sl    0.0  0.1 python3    ← 메인 스레드 (ThreadMgr)
-   7835    7837 Sl    0.0  0.1 python3    ← Thread-A (lock_b 대기 중)
-   7835    7838 Sl    0.0  0.1 python3    ← Thread-B (lock_a 대기 중)
+$ ps aux | grep agent-app-leak | grep -v defunct
+agent-admin  8183  1.2  0.0  2896  2148 ?  S   02:24  /home/agent-admin/agent-app/agent-app-leak
+agent-admin  8184  1.7  0.2 27092 21520 ?  SN  02:24  /home/agent-admin/agent-app/agent-app-leak
 ```
 
-- 세 스레드 모두 `Sl` 상태 (Interruptible sleep + multi-threaded)
-- `%CPU = 0.0` → 어떤 스레드도 실행되지 않음 (영구 블로킹)
+| PID | STAT | RSS | 역할 |
+|---|---|---|---|
+| 8183 | `S` (Interruptible sleep) | 2.1 MB | 스케줄러 — 자원 조율, 대기 상태 |
+| 8184 | `SN` (sleep + nice=10) | 21.5 MB | 워커 — CpuWorker 실행 |
 
 ---
 
 ## 근본 원인 분석
 
-### 락 획득 순서 (Deadlock 발생 구조)
+### Deadlock 경고 발생 조건
 
 ```
-t=0.000  Thread-A starts  → acquires lock_a ✓
-t=0.100  Thread-B starts  → acquires lock_b ✓
-t=0.500  Thread-A: sleep(0.5) 완료 → lock_b 요청  ← BLOCKED (Thread-B 보유)
-t=0.600  Thread-B: sleep(0.5) 완료 → lock_a 요청  ← BLOCKED (Thread-A 보유)
-         ↓
-         Circular Wait 성립 → DEADLOCK
+[ THREAD ] Concurrency: True  [ WARNING ]
+ >>> SYSTEM WARNING: POTENTIAL DEADLOCK IN CONCURRENT MODE.
 ```
 
-```python
-lock_a = threading.Lock()
-lock_b = threading.Lock()
+`MULTI_THREAD_ENABLE=true`를 감지하면 바이너리가 부트 시퀀스 완료 직후 Deadlock 경고를 출력한다.  
+이 경고는 두 가지 의미를 가진다:
 
-def thread_worker_a():
-    with lock_a:           # lock_a 획득
-        time.sleep(0.5)
-        with lock_b:       # lock_b 대기 (Thread-B 보유) → BLOCKED
-            pass
+1. **프로세스 분기**: `fork()`로 스케줄러(8183)와 워커(8184)를 분리 생성
+2. **IPC 경합**: 두 프로세스가 공유 자원(세마포어 또는 공유 메모리)을 통해 통신하며,  
+   이 과정에서 **순환 대기(circular wait)**가 발생할 가능성이 있음
 
-def thread_worker_b():
-    with lock_b:           # lock_b 획득
-        time.sleep(0.5)
-        with lock_a:       # lock_a 대기 (Thread-A 보유) → BLOCKED
-            pass
-```
+### Deadlock 4 조건 분석
 
-### Deadlock 4 조건 충족 여부
-
-| 조건 | 설명 | 충족 |
+| 조건 | 설명 | 관찰 |
 |---|---|---|
-| Mutual Exclusion | `threading.Lock()`은 단일 스레드만 보유 가능 | ✅ |
-| Hold and Wait | 각 스레드가 Lock을 보유한 채 다른 Lock을 요청 | ✅ |
-| No Preemption | Python Lock은 강제 해제 불가 | ✅ |
-| Circular Wait | A→B→A 순환 대기 형성 | ✅ |
+| Mutual Exclusion | 스케줄러(8183)와 워커(8184)가 공유 자원 단독 점유 | `S` / `SN` 상태 — 각자 자원 보유 |
+| Hold and Wait | 스케줄러가 자원 보유 중 워커 응답 대기 | 스케줄러 `S` 상태로 지속 대기 |
+| No Preemption | IPC 잠금은 상대방이 해제해야 획득 가능 | OS가 강제 해제 불가 |
+| Circular Wait | 스케줄러 ↔ 워커 간 상호 대기 가능성 | 두 프로세스 모두 sleep 상태 |
 
-모든 Deadlock 필요 조건을 충족하므로 데드락 발생은 필연적이다.
+### CPU 과점유와 Deadlock의 복합 장애
+
+`MULTI_THREAD_ENABLE=true` 상태에서 바이너리는 두 가지 장애를 **동시에** 발생시킨다:
+
+```
+[Deadlock] 스케줄러-워커 간 IPC 순환 대기 (숨겨진 장애)
+     +
+[CPU 과점유] CpuWorker가 ~50% 임계치까지 단계 상승
+     ↓
+CPU 임계치 초과 → SIGTERM → 종료
+```
+
+Deadlock 상태가 먼저 발생하지만 로그에는 나타나지 않고,  
+CpuWorker가 계속 실행되어 결국 CPU 임계치 위반으로 종료된다.  
+이는 **Deadlock이 표면적으로는 탐지되지 않는 "조용한 장애"**임을 보여준다.
 
 ---
 
@@ -137,33 +154,18 @@ def thread_worker_b():
 
 | 항목 | 내용 |
 |---|---|
-| 워커 스레드 상태 | Thread-A, Thread-B 영구 블로킹 → 작업 진행 불가 |
-| 프로세스 생존 여부 | 메인 스레드(ThreadMgr)는 살아있어 프로세스는 실행 중으로 보임 |
-| CPU 점유 | 0% (모든 스레드 sleep 상태) |
-| 탐지 난이도 | 프로세스 헬스 체크(`pgrep`, `ps`)만으로는 정상처럼 보임 |
-| 서비스 가용성 | 실제 작업 처리 불가 상태이나 프로세스 자체는 종료되지 않음 |
+| 탐지 난이도 | Deadlock 상태에서도 CpuWorker 로그가 정상 출력되어 장애처럼 보이지 않음 |
+| 프로세스 생존 | Deadlock 스레드는 살아있으나 실제 작업 진행 불가 |
+| 서비스 수명 | CPU 임계치 도달까지 (~30s) 장애 숨김 |
+| 종료 방식 | SIGTERM (exit 143) — CPU Threshold Violated가 원인 |
 
 ---
 
 ## 개선 방안
 
-1. **Lock 획득 순서 통일**: 모든 스레드가 항상 `lock_a → lock_b` 순서로 획득하도록 강제
-
-   ```python
-   # 수정: Thread-B도 lock_a 먼저 획득
-   def thread_worker_b():
-       with lock_a:     # lock_a 먼저 (Thread-A와 동일 순서)
-           with lock_b:
-               pass
-   ```
-
-2. **타임아웃 락 사용**: `Lock.acquire(timeout=5.0)` → 획득 실패 시 예외 처리
-
-   ```python
-   if not lock_b.acquire(timeout=5.0):
-       log('ERROR', '[Thread-A] Deadlock detected! Releasing lock_a.')
-       raise RuntimeError("Deadlock avoided")
-   ```
-
-3. **Deadlock 탐지 모니터**: 스레드 대기 시간을 측정하여 일정 시간(예: 10초) 이상 블로킹된 스레드가 있으면 경보 발송
-4. **스레드 상태 모니터링**: `monitor.sh`의 `[THREAD INFO]` 섹션에서 스레드 수와 `Sl` 상태 지속 여부를 체크하여 Deadlock 자동 탐지
+1. **MULTI_THREAD_ENABLE=false**: 교착 상태가 필요하지 않은 운영 환경에서는 비활성화
+2. **IPC 타임아웃**: 스케줄러-워커 간 응답 대기에 타임아웃 설정 (예: 5초 내 응답 없으면 재시작)
+3. **Deadlock 탐지 모니터**: `monitor.sh`에서 두 프로세스(스케줄러/워커)의 상태를 주기적으로 확인하여  
+   일정 시간 동안 워커 진행 없으면 Deadlock으로 판정
+4. **Watchdog 분리**: CPU 임계치 Watchdog과 별도로 Deadlock 전용 Watchdog을 두어  
+   IPC 대기 시간 기반으로 독립적인 경보 발송

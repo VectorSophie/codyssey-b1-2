@@ -1,9 +1,9 @@
 #!/bin/bash
-# monitor.sh - Per-process monitoring for agent-leak-app
+# monitor.sh - Per-process monitoring for agent-app-leak
 # Tracks process-level CPU/MEM and system-level DISK/FIREWALL
-# Log format: [YYYY-MM-DD HH:MM:SS] PROCESS:agent-leak-app CPU:X% MEM:XMB(X%) DISK:XG FIREWALL:active|inactive
+# Log format: [YYYY-MM-DD HH:MM:SS] PROCESS:agent-app-leak CPU:X% MEM:XMB(X%) DISK:XG FIREWALL:active|inactive
 
-APP_NAME="agent-leak-app"
+APP_NAME="${AGENT_APP_NAME:-agent-app-leak}"
 APP_PORT="${AGENT_PORT:-15034}"
 LOG_DIR="${AGENT_LOG_DIR:-/var/log/agent-app}"
 LOG_FILE="${LOG_DIR}/monitor.log"
