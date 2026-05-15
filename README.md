@@ -79,31 +79,31 @@ Agent READY
 
 ## 7. 실행 방법
 
-### 7.1 컨테이너 진입
+### 7.1 컨테이너 진입 및 계정 전환
 
 ```powershell
+# Windows에서 컨테이너 진입
 docker exec -it agent-leak-lab bash
 ```
 
-> **주의**: 컨테이너 진입 후 기본 사용자는 `root`입니다.
-> `agent-app-leak`은 root 실행을 금지하며, root로 실행 시 부트 시퀀스 1단계에서 즉시 FAIL 처리됩니다.
->
-> ```
-> [1/6] Checking User Account    [FAIL]
->    >>> Error: Running as 'root' is forbidden.
-> ```
->
-> 반드시 아래 방법 중 하나로 `agent-admin` 계정으로 전환하여 실행하세요.
->
-> ```bash
-> # 방법 1: 계정 전환 후 실행
-> su - agent-admin
->
-> # 방법 2: sudo로 직접 실행 (계정 전환 없이)
-> sudo -u agent-admin bash -c "export AGENT_HOME=... && $AGENT_HOME/agent-app-leak"
-> ```
+컨테이너 진입 후 기본 사용자는 `root`다. `agent-app-leak`은 root 실행을 금지하며, root로 실행하면 1단계에서 즉시 전체 FAIL 처리된다.
 
-### 7.2 환경변수 세팅 (공통, 한 번만)
+```
+[1/6] Checking User Account    [FAIL]
+   >>> Error: Running as 'root' is forbidden.
+```
+
+반드시 `agent-admin`으로 전환한 뒤 실행한다:
+
+```bash
+su - agent-admin
+```
+
+> **주의**: `su - agent-admin` 전환 후에는 `sudo -u agent-admin bash -c "..."` 형태를 사용하면 안 된다.
+> `sudo`는 실행 시 새로운 환경을 만들기 때문에 이전에 export한 환경변수가 모두 초기화된다.
+> 계정 전환 후에는 export와 실행을 현재 셸에서 직접 실행한다.
+
+### 7.2 환경변수 세팅 (계정 전환 후, 한 번만)
 
 ```bash
 export AGENT_HOME=/home/agent-admin/agent-app
@@ -115,37 +115,33 @@ export AGENT_LOG_DIR=/var/log/agent-app
 
 ### 7.3 시나리오별 실행
 
+공통 환경변수(7.2)를 export한 상태에서 아래 명령을 순서대로 실행한다.
+
 ```bash
 # OOM — 메모리 누수 (약 12초 내 SIGKILL, exit 137)
-export MEMORY_LIMIT=100; export CPU_MAX_OCCUPY=100; export MULTI_THREAD_ENABLE=false
+export MEMORY_LIMIT=100 CPU_MAX_OCCUPY=100 MULTI_THREAD_ENABLE=false
 $AGENT_HOME/agent-app-leak
+echo "exit: $?"
 
-# CPU 과점유 (약 30초 내 SIGTERM, exit 143)
-export MEMORY_LIMIT=512; export CPU_MAX_OCCUPY=100; export MULTI_THREAD_ENABLE=false
+# CPU 과점유 (약 34초 내 SIGTERM, exit 143)
+export MEMORY_LIMIT=512 CPU_MAX_OCCUPY=100 MULTI_THREAD_ENABLE=false
 $AGENT_HOME/agent-app-leak
+echo "exit: $?"
 
-# Deadlock + CPU (약 30초 내 SIGTERM)
-export MEMORY_LIMIT=512; export CPU_MAX_OCCUPY=100; export MULTI_THREAD_ENABLE=true
+# Deadlock + CPU (약 30초 내 SIGTERM, exit 143)
+export MEMORY_LIMIT=512 CPU_MAX_OCCUPY=100 MULTI_THREAD_ENABLE=true
 $AGENT_HOME/agent-app-leak
+echo "exit: $?"
 
-# 정상 모드 (Cooldown, 종료 없음)
-export MEMORY_LIMIT=512; export CPU_MAX_OCCUPY=20; export MULTI_THREAD_ENABLE=false
+# 정상 모드 (Cooldown 반복, 종료 없음)
+export MEMORY_LIMIT=512 CPU_MAX_OCCUPY=20 MULTI_THREAD_ENABLE=false
 $AGENT_HOME/agent-app-leak
 ```
 
-### 7.4 종료 코드 확인
+### 7.4 실행 중 프로세스 관찰 (별도 터미널)
 
 ```bash
-$AGENT_HOME/agent-app-leak
-echo "exit code: $?"
-# OOM      → 137 (128 + 9,  SIGKILL)
-# CPU/Dead → 143 (128 + 15, SIGTERM)
-```
-
-### 7.5 실행 중 프로세스 관찰 (별도 터미널)
-
-```bash
-# 같은 컨테이너에 두 번째 터미널로 진입
+# Windows에서 두 번째 터미널로 컨테이너 진입
 docker exec -it agent-leak-lab bash
 
 # 프로세스 상태 실시간 관찰
@@ -158,16 +154,13 @@ watch -n 1 'ps -eLf | grep agent-app-leak | grep -v grep'
 top -p $(pgrep -f agent-app-leak | head -1)
 ```
 
-### 7.6 monitor.sh 실행
+### 7.5 monitor.sh 실행 (agent-admin 셸에서)
 
 ```bash
-AGENT_HOME=/home/agent-admin/agent-app \
-AGENT_PORT=15034 \
-AGENT_LOG_DIR=/var/log/agent-app \
 /home/agent-admin/agent-app/bin/monitor.sh
 ```
 
-### 7.7 로그 확인
+### 7.6 로그 확인
 
 ```bash
 tail -f /var/log/agent-app/monitor.log      # 실시간 스트림
