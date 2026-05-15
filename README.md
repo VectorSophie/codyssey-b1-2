@@ -85,6 +85,24 @@ Agent READY
 docker exec -it agent-leak-lab bash
 ```
 
+> **주의**: 컨테이너 진입 후 기본 사용자는 `root`입니다.
+> `agent-app-leak`은 root 실행을 금지하며, root로 실행 시 부트 시퀀스 1단계에서 즉시 FAIL 처리됩니다.
+>
+> ```
+> [1/6] Checking User Account    [FAIL]
+>    >>> Error: Running as 'root' is forbidden.
+> ```
+>
+> 반드시 아래 방법 중 하나로 `agent-admin` 계정으로 전환하여 실행하세요.
+>
+> ```bash
+> # 방법 1: 계정 전환 후 실행
+> su - agent-admin
+>
+> # 방법 2: sudo로 직접 실행 (계정 전환 없이)
+> sudo -u agent-admin bash -c "export AGENT_HOME=... && $AGENT_HOME/agent-app-leak"
+> ```
+
 ### 7.2 환경변수 세팅 (공통, 한 번만)
 
 ```bash
