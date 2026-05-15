@@ -79,23 +79,81 @@ Agent READY
 
 ## 7. 실행 방법
 
+### 7.1 컨테이너 진입
+
+```powershell
+docker exec -it agent-leak-lab bash
+```
+
+### 7.2 환경변수 세팅 (공통, 한 번만)
+
 ```bash
-# 공통 환경변수 (agent-admin 계정에서 실행)
 export AGENT_HOME=/home/agent-admin/agent-app
 export AGENT_PORT=15034
 export AGENT_UPLOAD_DIR=/home/agent-admin/agent-app/upload_files
 export AGENT_KEY_PATH=/home/agent-admin/agent-app/api_keys
 export AGENT_LOG_DIR=/var/log/agent-app
+```
 
-# OOM 시나리오 (100MB 제한 → ~12초 내 SIGKILL)
+### 7.3 시나리오별 실행
+
+```bash
+# OOM — 메모리 누수 (약 12초 내 SIGKILL, exit 137)
 export MEMORY_LIMIT=100; export CPU_MAX_OCCUPY=100; export MULTI_THREAD_ENABLE=false
 $AGENT_HOME/agent-app-leak
 
-# CPU 과점유 시나리오 (CPU_MAX_OCCUPY=100 → ~90초 내 SIGTERM)
+# CPU 과점유 (약 30초 내 SIGTERM, exit 143)
 export MEMORY_LIMIT=512; export CPU_MAX_OCCUPY=100; export MULTI_THREAD_ENABLE=false
 $AGENT_HOME/agent-app-leak
 
-# Deadlock 시나리오 (POTENTIAL DEADLOCK 경고 + CPU 과점유)
+# Deadlock + CPU (약 30초 내 SIGTERM)
 export MEMORY_LIMIT=512; export CPU_MAX_OCCUPY=100; export MULTI_THREAD_ENABLE=true
 $AGENT_HOME/agent-app-leak
+
+# 정상 모드 (Cooldown, 종료 없음)
+export MEMORY_LIMIT=512; export CPU_MAX_OCCUPY=20; export MULTI_THREAD_ENABLE=false
+$AGENT_HOME/agent-app-leak
+```
+
+### 7.4 종료 코드 확인
+
+```bash
+$AGENT_HOME/agent-app-leak
+echo "exit code: $?"
+# OOM      → 137 (128 + 9,  SIGKILL)
+# CPU/Dead → 143 (128 + 15, SIGTERM)
+```
+
+### 7.5 실행 중 프로세스 관찰 (별도 터미널)
+
+```bash
+# 같은 컨테이너에 두 번째 터미널로 진입
+docker exec -it agent-leak-lab bash
+
+# 프로세스 상태 실시간 관찰
+watch -n 1 'ps aux | grep agent-app-leak | grep -v grep'
+
+# 스레드 포함 상세 보기 (Deadlock 확인용)
+watch -n 1 'ps -eLf | grep agent-app-leak | grep -v grep'
+
+# CPU/메모리 실시간
+top -p $(pgrep -f agent-app-leak | head -1)
+```
+
+### 7.6 monitor.sh 실행
+
+```bash
+AGENT_HOME=/home/agent-admin/agent-app \
+AGENT_PORT=15034 \
+AGENT_LOG_DIR=/var/log/agent-app \
+/home/agent-admin/agent-app/bin/monitor.sh
+```
+
+### 7.7 로그 확인
+
+```bash
+tail -f /var/log/agent-app/monitor.log      # 실시간 스트림
+tail -10 /var/log/agent-app/monitor.log     # 최근 10줄
+grep WARNING /var/log/agent-app/monitor.log # 경고만 필터
+wc -l /var/log/agent-app/monitor.log        # 전체 줄 수
 ```
