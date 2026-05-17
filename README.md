@@ -37,13 +37,10 @@ codyssey-b1-2/
 ├── agent-app-leak          # 분석 대상 바이너리 (Linux ELF x86_64, 7.6MB)
 ├── bin/
 │   └── monitor.sh          # 프로세스별 관제 스크립트
-├── issues/
-│   ├── 01-oom-memory-leak.md        # Issue #1: OOM 장애 분석
-│   ├── 02-cpu-overoccupy.md         # Issue #2: CPU 과점유 분석
-│   ├── 03-deadlock.md               # Issue #3: Deadlock 분석
-│   └── 04-scheduling-analysis.md   # Bonus: 스케줄링 알고리즘 추론
 └── README.md
 ```
+
+> 장애 이슈 보고서는 GitHub Issues로 등록됨 (#1 OOM, #2 CPU, #3 Deadlock, #4 Scheduling Analysis)
 
 ## 5. 부트 시퀀스 (6단계)
 
@@ -73,9 +70,9 @@ Agent READY
 | 조건 | 시나리오 |
 |---|---|
 | `MEMORY_LIMIT < 256` | **OOM / Memory Leak** — MemoryWorker가 25 MB/3s씩 누적 할당 |
-| `MEMORY_LIMIT >= 256`, `CPU_MAX_OCCUPY=100`, `MULTI_THREAD_ENABLE=false` | **CPU 과점유** — CpuWorker가 단계적으로 부하 상승 |
-| `MEMORY_LIMIT >= 256`, `CPU_MAX_OCCUPY=100`, `MULTI_THREAD_ENABLE=true` | **Deadlock + CPU** — "POTENTIAL DEADLOCK" 경고 + CpuWorker 동시 실행 |
-| `CPU_MAX_OCCUPY <= 20` | **Healthy System Monitoring** — 제어된 부하/냉각 반복 |
+| `MEMORY_LIMIT >= 256`, `CPU_MAX_OCCUPY=100`, `MULTI_THREAD_ENABLE=false` | **CPU 과점유** — CpuWorker가 단계적으로 부하 상승, SIGTERM (exit 143) |
+| `MEMORY_LIMIT >= 256`, `CPU_MAX_OCCUPY <= 20`, `MULTI_THREAD_ENABLE=true` | **Deadlock** — "POTENTIAL DEADLOCK" 경고, 스케줄러 IPC 대기 고착 |
+| `MEMORY_LIMIT >= 256`, `CPU_MAX_OCCUPY <= 20`, `MULTI_THREAD_ENABLE=false` | **Healthy System Monitoring** — 제어된 부하/냉각 반복 |
 
 ## 7. 실행 방법
 
@@ -128,10 +125,9 @@ export MEMORY_LIMIT=512 CPU_MAX_OCCUPY=100 MULTI_THREAD_ENABLE=false
 $AGENT_HOME/agent-app-leak
 echo "exit: $?"
 
-# Deadlock + CPU (약 30초 내 SIGTERM, exit 143)
-export MEMORY_LIMIT=512 CPU_MAX_OCCUPY=100 MULTI_THREAD_ENABLE=true
+# Deadlock (POTENTIAL DEADLOCK 경고 + 스케줄러 IPC 대기 고착, Ctrl+C로 수동 종료)
+export MEMORY_LIMIT=512 CPU_MAX_OCCUPY=20 MULTI_THREAD_ENABLE=true
 $AGENT_HOME/agent-app-leak
-echo "exit: $?"
 
 # 정상 모드 (Cooldown 반복, 종료 없음)
 export MEMORY_LIMIT=512 CPU_MAX_OCCUPY=20 MULTI_THREAD_ENABLE=false
@@ -154,17 +150,49 @@ watch -n 1 'ps -eLf | grep agent-app-leak | grep -v grep'
 top -p $(pgrep -f agent-app-leak | head -1)
 ```
 
-### 7.5 monitor.sh 실행 (agent-admin 셸에서)
+### 7.5 monitor.sh 단발 실행 (agent-admin 셸에서)
 
 ```bash
 /home/agent-admin/agent-app/bin/monitor.sh
 ```
 
-### 7.6 로그 확인
+### 7.6 crontab으로 monitor.sh 자동화 (매 1분마다)
+
+`agent-admin` 셸에서 아래 명령으로 crontab을 편집한다.
 
 ```bash
-tail -f /var/log/agent-app/monitor.log      # 실시간 스트림
-tail -10 /var/log/agent-app/monitor.log     # 최근 10줄
-grep WARNING /var/log/agent-app/monitor.log # 경고만 필터
-wc -l /var/log/agent-app/monitor.log        # 전체 줄 수
+crontab -e
+```
+
+편집기가 열리면 아래 줄을 추가하고 저장한다 (vi 기준: `i` 입력 → 내용 붙여넣기 → `Esc` → `:wq`):
+
+```
+* * * * * AGENT_PORT=15034 AGENT_LOG_DIR=/var/log/agent-app /home/agent-admin/agent-app/bin/monitor.sh >> /var/log/agent-app/monitor-cron.log 2>&1
+```
+
+> cron 환경은 셸에서 export한 환경변수를 상속하지 않는다. 위처럼 `KEY=VALUE command` 형태로 crontab 줄 앞에 직접 지정해야 한다.
+
+설정 확인:
+
+```bash
+crontab -l           # 등록된 crontab 목록 출력
+```
+
+### 7.7 자동화된 monitor.sh 로그 확인
+
+```bash
+# cron이 직접 기록하는 에러/stdout (monitor.sh가 프로세스를 찾지 못했을 때 등)
+tail -f /var/log/agent-app/monitor-cron.log
+
+# monitor.sh 내부에서 LOG_FILE로 기록하는 한 줄 요약 (정상 수집 시)
+tail -f /var/log/agent-app/monitor.log
+
+# 최근 10줄
+tail -10 /var/log/agent-app/monitor.log
+
+# 경고만 필터
+grep WARNING /var/log/agent-app/monitor.log
+
+# 전체 줄 수 (매분 1줄 누적)
+wc -l /var/log/agent-app/monitor.log
 ```
